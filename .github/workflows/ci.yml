@@ -1,37 +1,77 @@
-name: CI
+name: CI/CD Laravel
 
 on:
   push:
-    branches: [main, dev]
+    branches: ['**']
   pull_request:
     branches: [main, dev]
 
 jobs:
-  lint:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3.25'
+          php-version: '8.3'
 
-      - run: composer install --no-interaction --prefer-dist
+      - name: Pasang dependensi produksi
+        run: composer install --no-dev --no-interaction --prefer-dist --optimize-autoloader
 
-      - name: Check code style with Pint
-        run: ./vendor/bin/pint --test
+      - name: Simpan vendor sebagai artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rilis
+          path: vendor/
+          retention-days: 3
 
   test:
+    needs: build
     runs-on: ubuntu-latest
-    needs: lint
     steps:
       - uses: actions/checkout@v4
 
       - uses: shivammathur/setup-php@v2
         with:
-          php-version: '8.3.15'
+          php-version: '8.3'
 
-      - run: composer install --no-interaction --prefer-dist
-      - run: cp .env.example .env
-      - run: php artisan key:generate
-      - run: php artisan test
+      - name: Pasang dependensi (termasuk paket dev)
+        run: composer install --no-interaction --prefer-dist
+
+      - name: Siapkan .env dan APP_KEY
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+
+      - name: Cek gaya kode dengan Pint
+        run: vendor/bin/pint --test
+
+      - name: Jalankan pengujian
+        run: php artisan test
+
+  staging:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy ke staging (simulasi)
+        run: |
+          echo "Deploy ke server staging untuk commit ${{ github.sha }}"
+          echo "Branch: ${{ github.ref_name }}"
+          echo "Staging belum punya server sungguhan, jadi tahap ini cukup echo."
+
+  production:
+    needs: staging
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Jalankan langkah deploy.sh (simulasi)
+        run: |
+          echo "1 · Kunci pintu: php artisan down --retry=60"
+          echo "2 · Ambil kode terbaru: git pull origin main"
+          echo "3 · Pasang dependensi: composer install --no-dev --optimize-autoloader"
+          echo "4 · Ubah skema basis data: php artisan migrate --force"
+          echo "5 · Bangun ulang cache: php artisan config:cache, route:cache, view:cache"
+          echo "6 · Muat ulang pekerja antrean: php artisan queue:restart"
+          echo "7 · Buka pintu kembali: php artisan up"
